@@ -28,7 +28,7 @@ TRAIN_NAME = os.path.splitext(os.path.basename(__file__))[0]
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Action Recognition Using Sparse Point Cloud')
     parser.add_argument('--name', type=str, default='', help='Name of the experiment')
-    parser.add_argument('--model', type=str, default='MAKGCN', help='Model architecture to use')
+    parser.add_argument('--model', type=str, default='SEdgeNet', help='Model architecture to use')
     parser.add_argument('--batch_size', type=int, default=32, help='Training batch size')
     parser.add_argument('--test_batch_size', type=int, default=16, help='Test batch size')
     parser.add_argument('--epochs', type=int, default=500, help='Number of training epochs')
@@ -41,14 +41,15 @@ def parse_arguments():
     parser.add_argument('--num_points', type=int, default=1100, help='Number of points per sample (max_points * stacks).')
     parser.add_argument('--dropout', type=float, default=0.5, help='Dropout rate')
     parser.add_argument('--emb_dims', type=int, default=1024, help='Dimension of latent embeddings')
-    parser.add_argument('--k', type=int, default=20, help='Number of nearest neighbors (k) for graph construction')
+    parser.add_argument('--k', type=int, default=50, help='Number of nearest neighbors (k) for graph construction')
     parser.add_argument('--model_path', type=str, default='', help='Path to a pretrained model')
     parser.add_argument('--gpu_idx', type=int, default=0, help='GPU index (set to -1 for CPU, 0 for first GPU, etc.)')
     parser.add_argument('--patience', type=int, default=50, help='Early stopping patience')
-    parser.add_argument('--num_heads', type=int, default=4, help='Number of multi-head kernel filters (for MAK layer)')
+    parser.add_argument('--num_runs', type=int, default=5, help='Number of training runs with different seeds')
+    parser.add_argument('--num_layers', type=int, default=5, help='Number of conv layers to use')
+    parser.add_argument('--sample_ratio', type=float, default=0.6, help='fraction of neighbors to keep when sampling (0 < sample_ratio <= 1)')
     return parser.parse_args()
-
-def _init_(args):
+def _init_(args,run_num=None):
     """
     Initialize the directory for storing models and backups.
     """
@@ -56,12 +57,14 @@ def _init_(args):
         args.name = TRAIN_NAME
     model_dir = os.path.join('models', args.name)
     os.makedirs(os.path.join(model_dir, 'models'), exist_ok=True)
-    os.system(f'cp {TRAIN_NAME}.py {model_dir}/{TRAIN_NAME}.py.backup')
-    os.system(f'cp {args.model}.py {model_dir}/{args.model}.py.backup')
-    os.system(f'cp util.py {model_dir}/util.py.backup')
-    os.system(f'cp data.py {model_dir}/data.py.backup')
 
-def train(args, io):
+    if run_num is None or run_num == 1:
+        os.system(f'cp {TRAIN_NAME}.py {model_dir}/{TRAIN_NAME}.py.backup')
+        os.system(f'cp {args.model}.py {model_dir}/{args.model}.py.backup')
+        os.system(f'cp util.py {model_dir}/util.py.backup')
+        os.system(f'cp data.py {model_dir}/data.py.backup')
+
+def train(args, io,  run_num=1):
     """
     Train the model using the specified arguments and log with IOStream.
     """
@@ -76,7 +79,7 @@ def train(args, io):
     # Configure dataset
     root_dir = ''  # Current directory or specify directory
     mmr_dataset_config = {
-        'processed_data': 'data/processed/mmr_action_head_2/data.pkl',
+        'processed_data': 'data/processed/mmr_action/data.pkl',
         'stacks': 50,  
         'max_points': 22,
         'zero_padding': 'per_data_point',
@@ -105,7 +108,7 @@ def train(args, io):
     model = MODEL.Net(args)
     model = model.to(device)
     print(model)
-
+            
     # Choose optimizer
     if args.use_sgd:
         io.cprint("Using SGD optimizer")
@@ -148,9 +151,9 @@ def train(args, io):
         train_acc = metrics.accuracy_score(train_true, train_pred)
         avg_train_acc = metrics.balanced_accuracy_score(train_true, train_pred)
         learning_rate = optimizer.param_groups[0]['lr']
-        io.cprint(f'EPOCH {epoch}  lr = {learning_rate:.6f}')
-        io.cprint(f'Train {epoch}, loss: {train_loss / count:.6f}, '
-                  f'train acc: {train_acc:.6f}, train avg acc: {avg_train_acc:.6f}')
+        io.cprint(f'[Run {run_num}] EPOCH {epoch}  lr = {learning_rate:.6f}')
+        io.cprint(f'[Run {run_num}] Train {epoch}, loss: {train_loss / count:.6f}, '
+                f'train acc: {train_acc:.6f}, train avg acc: {avg_train_acc:.6f}')
         # Validation
         model.eval()
         val_loss = 0.0
@@ -175,8 +178,9 @@ def train(args, io):
         val_pred = np.concatenate(val_pred)
         val_acc = metrics.accuracy_score(val_true, val_pred)
         avg_val_acc = metrics.balanced_accuracy_score(val_true, val_pred)
-        io.cprint(f'Val {epoch}, loss: {val_loss / count:.6f}, '
-                  f'val acc: {val_acc:.6f}, val avg acc: {avg_val_acc:.6f}')
+
+        io.cprint(f'[Run {run_num}] Val {epoch}, loss: {val_loss / count:.6f}, '
+                f'val acc: {val_acc:.6f}, val avg acc: {avg_val_acc:.6f}')
         
         # Early stopping check
         current_val_loss = val_loss / count
@@ -184,14 +188,15 @@ def train(args, io):
             best_val_loss = current_val_loss
             patience_counter = 0
             # Save the best model
-            torch.save(model.state_dict(), f'models/{args.name}/models/model.t7')
-            io.cprint(f'Best model saved to models/{args.name}/models/model.t7')
+            torch.save(model.state_dict(), f'models/{args.name}/models/model_run{run_num}.t7')
+            io.cprint(f'[Run {run_num}] Best model saved to models/{args.name}/models/model_run{run_num}.t7')
         else:
             patience_counter += 1
-            io.cprint(f'EarlyStopping counter: {patience_counter} out of {args.patience}')
+            io.cprint(f'[Run {run_num}] EarlyStopping counter: {patience_counter} out of {args.patience}')
             if patience_counter >= args.patience:
-                io.cprint('Early stopping triggered')
-                break  
+                io.cprint(f'[Run {run_num}] Early stopping triggered')
+                break 
+
          # Scheduler update
         if epoch < args.Tmax:
             scheduler.step()
@@ -200,9 +205,10 @@ def train(args, io):
             for group in optimizer.param_groups:
                 group['lr'] = 0.0001
 
-def test(args, io):
+def test(args, io, run_num=None):
     """
     Test the model using the best saved weights, and compute FLOPs.
+    If run_num is None, tests all runs, otherwise tests specific run.
     """
     MODEL = import_module(args.model)
     device = torch.device('cpu' if args.gpu_idx < 0 else f'cuda:{args.gpu_idx}')
@@ -210,7 +216,7 @@ def test(args, io):
     # Dataset configuration
     root_dir = ''  # Current directory or specify directory
     mmr_dataset_config = {
-        'processed_data': 'data/processed/mmr_action_head_2/data.pkl',
+        'processed_data': 'data/processed/mmr_action/data.pkl',
         'stacks': 50,
         'max_points': 22,
         'zero_padding': 'per_data_point',
@@ -226,59 +232,106 @@ def test(args, io):
         drop_last=False
     )
 
-    io.cprint('********** TEST STAGE **********')
-    io.cprint('Loading the best model for evaluation')
+    if run_num is None:
+        # Test all runs
+        run_files = [f for f in os.listdir(f'models/{args.name}/models') if f.startswith('model_run')]
+        run_nums = sorted([int(f.split('run')[1].split('.')[0]) for f in run_files])
+    else:
+        run_nums = [run_num]
 
-    # Load the best model
-    model = MODEL.Net(args)
-    model = model.to(device)
 
-    model.load_state_dict(torch.load(f'models/{args.name}/models/model.t7'))
-    model.eval()
+    for current_run in run_nums:
+        io.cprint(f'********** TEST STAGE FOR RUN {current_run} **********')
+        io.cprint(f'Loading model for run {current_run}')
 
-     # Compute FLOPs
-    net_for_flops = model.module if hasattr(model, 'module') else model
-    input_shape = (3, args.num_points) # (channels, num_points)
+        # Load the model
+        model = MODEL.Net(args)
+        model = model.to(device)
 
-    macs, params = get_model_complexity_info(
-        net_for_flops, 
-        input_res=input_shape, 
-        as_strings=True,             
-        print_per_layer_stat=False, 
-        verbose=False
-    )
-    io.cprint(f'[FLOPs Computation] MACs: {macs}, Params: {params}')
-    # Evaluate on test set
-    test_pred = []
-    test_true = []
+        model_path = f'models/{args.name}/models/model_run{current_run}.t7'
+        if not os.path.exists(model_path):
+            io.cprint(f'Model not found for run {current_run}: {model_path}')
+            continue
 
-    with torch.no_grad():
-        for data, label in test_loader:
-            data, label = data.to(device), label.to(device).squeeze()
-            data = data.permute(0, 2, 1)
-            logits = model(data)
-            preds = logits.max(dim=1)[1]
-            test_true.append(label.cpu().numpy())
-            test_pred.append(preds.detach().cpu().numpy())
+        model.load_state_dict(torch.load(model_path))
+        model.eval()
 
-    test_true = np.concatenate(test_true)
-    test_pred = np.concatenate(test_pred)
-    test_acc = metrics.accuracy_score(test_true, test_pred)
-    avg_test_acc = metrics.balanced_accuracy_score(test_true, test_pred)
-    test_precision, test_recall, test_f1, _ = metrics.precision_recall_fscore_support(
-        test_true, test_pred, average='macro')
-    io.cprint(f'Test Accuracy: {test_acc:.6f}, Test Avg Accuracy: {avg_test_acc:.6f}')
-    io.cprint(f'Test Precision: {test_precision:.6f}, Test Recall: {test_recall:.6f}, Test F1: {test_f1:.6f}')
+        # Compute FLOPs
+        net_for_flops = model.module if hasattr(model, 'module') else model
+        input_shape = (3, args.num_points) # (channels, num_points)
+
+        macs, params = get_model_complexity_info(
+            net_for_flops, 
+            input_res=input_shape, 
+            as_strings=True,             
+            print_per_layer_stat=False, 
+            verbose=False
+        )
+        io.cprint(f'[Run {current_run}] [FLOPs Computation] MACs: {macs}, Params: {params}')
+        
+        # Evaluate on test set
+        test_pred = []
+        test_true = []
+
+        with torch.no_grad():
+            for data, label in test_loader:
+                data, label = data.to(device), label.to(device).squeeze()
+                data = data.permute(0, 2, 1)
+                logits = model(data)
+                preds = logits.max(dim=1)[1]
+                test_true.append(label.cpu().numpy())
+                test_pred.append(preds.detach().cpu().numpy())
+
+        test_true = np.concatenate(test_true)
+        test_pred = np.concatenate(test_pred)
+        test_acc = metrics.accuracy_score(test_true, test_pred)
+        avg_test_acc = metrics.balanced_accuracy_score(test_true, test_pred)
+        test_precision, test_recall, test_f1, _ = metrics.precision_recall_fscore_support(
+            test_true, test_pred, average='macro')
+        io.cprint(f'[Run {current_run}] Test Accuracy: {test_acc:.6f}, Test Avg Accuracy: {avg_test_acc:.6f}')
+        io.cprint(f'[Run {current_run}] Test Precision: {test_precision:.6f}, Test Recall: {test_recall:.6f}, Test F1: {test_f1:.6f}')
 
 
 if __name__ == "__main__":
     args = parse_arguments()
-    init_seed(args.seed)
-    _init_(args)
-    io = IOStream(f'models/{args.name}/train.log')
-    io.cprint(str(args))
-
+    
     if not args.eval:
-        train(args, io)
+        # Training mode - run multiple times if specified
+        for run_num in range(1, args.num_runs + 1):
+            # Set different seed for each run (base seed + run number - 1)
+            current_seed = args.seed + run_num - 1
+            args.seed = current_seed
+            init_seed(current_seed)
+            
+            _init_(args, run_num)
+            io = IOStream(f'models/{args.name}/train_run{run_num}.log')
+            io.cprint(f'Starting training run {run_num} with seed {current_seed}')
+            io.cprint(str(args))
+            
+            # Train the model for this run
+            train(args, io, run_num)
+            
+            # Test the best model from this run immediately after training
+            io.cprint(f'\n{"="*50}')
+            io.cprint(f'Testing best model from run {run_num}')
+            io.cprint(f'{"="*50}\n')
+            
+            test_io = IOStream(f'models/{args.name}/test_run{run_num}.log')
+            test_io.cprint(f'Testing run {run_num} with seed {current_seed}')
+            
+            original_eval = args.eval
+            args.eval = True
+            test(args, test_io, run_num)
+            args.eval = original_eval
+            
+            test_io.close()
+            
+            io.cprint(f'\n{"="*50}')
+            io.cprint(f'Completed testing for run {run_num}')
+            io.cprint(f'{"="*50}\n')
+            
     else:
+        _init_(args)
+        io = IOStream(f'models/{args.name}/test.log')
+        io.cprint(str(args))
         test(args, io)

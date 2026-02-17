@@ -1,5 +1,5 @@
-# MAK-GCN
-This is the official repository for **Multi-Head Adaptive Graph Convolution Network for Sparse Point Cloud-Based Human Activity Recognition**
+# SEdgeNet
+This is the official repository for **SEdgeNet: Stochastic Edge Network for Human Activity Recognition Using Sparse Point Cloud**
 
 ## Prerequisites
 
@@ -9,12 +9,14 @@ This is the official repository for **Multi-Head Adaptive Graph Convolution Netw
 Create conda environment with python 3.8
 
 Install cuda toolkit using the command below from this link https://anaconda.org/nvidia/cuda-toolkit
+
 conda install nvidia/label/cuda-11.8.0::cuda-toolkit
 
 Then, install the following:
 conda install pytorch==2.1.0 torchvision==0.16.0 torchaudio==2.1.0 pytorch-cuda=11.8 -c pytorch -c nvidia
 conda install conda-forge::tqdm
 conda install conda-forge::pytorch_geometric
+conda install conda-forge::scikit-learn
 
 ```
 # Data Preparation

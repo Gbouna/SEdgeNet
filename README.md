@@ -15,6 +15,7 @@ Then, install the following:
 conda install pytorch==2.1.0 torchvision==0.16.0 torchaudio==2.1.0 pytorch-cuda=11.8 -c pytorch -c nvidia
 conda install conda-forge::tqdm
 conda install conda-forge::pytorch_geometric
+conda install conda-forge::scikit-learn
 
 ```
 # Data Preparation

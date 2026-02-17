@@ -1,5 +1,5 @@
-# MAK-GCN
-This is the official repository for **Multi-Head Adaptive Graph Convolution Network for Sparse Point Cloud-Based Human Activity Recognition**
+# SEdgeNet
+This is the official repository for **SEdgeNet: Stochastic Edge Network for Human Activity Recognition Using Sparse Point Cloud**
 
 ## Prerequisites
 

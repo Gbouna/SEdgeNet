@@ -9,6 +9,7 @@ This is the official repository for **SEdgeNet: Stochastic Edge Network for Huma
 Create conda environment with python 3.8
 
 Install cuda toolkit using the command below from this link https://anaconda.org/nvidia/cuda-toolkit
+
 conda install nvidia/label/cuda-11.8.0::cuda-toolkit
 
 Then, install the following:
